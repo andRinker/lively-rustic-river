@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    :root { --ink: #1f2328; --quiet: #656d76; --line: #d0d7de; --accent: #1a73e8; --late: #c5221f; --bg: #fff; }
+    @media (prefers-color-scheme: dark) {
+      :root { --ink: #e6edf3; --quiet: #9198a1; --line: #3d444d; --accent: #8ab4f8; --late: #f28b82; --bg: #161b22; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; background: var(--bg); color: var(--ink);
+           font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 4px 0 2px; }
+    .sub { color: var(--quiet); margin: 0 0 20px; }
+    h2 { font-size: 15px; margin: 24px 0 8px; }
+    textarea { width: 100%; min-height: 72px; padding: 10px; font: inherit; color: var(--ink);
+               background: transparent; border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
+    .hint { color: var(--quiet); font-size: 13px; margin: 6px 0 0; }
+    button { margin-top: 8px; padding: 8px 16px; font: inherit; font-weight: 600; color: #fff;
+             background: var(--accent); border: 0; border-radius: 8px; cursor: pointer; }
+    button:disabled { opacity: .5; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    li input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
+    .task { flex: 1; }
+    .meta { color: var(--quiet); font-size: 13px; }
+    .late { color: var(--late); font-weight: 600; }
+    a { color: var(--accent); }
+    .empty { color: var(--quiet); padding: 12px 0; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Prep Prepper</h1>
+  <p class="sub" id="count">Loading your list…</p>
+
+  <h2>To do this prep</h2>
+  <ul id="list"></ul>
+
+  <h2>Brain dump</h2>
+  <textarea id="dump" placeholder="One thing per line, e.g. &quot;order chart paper by Thursday 5 min&quot;"></textarea>
+  <p class="hint">Deadlines it understands: today, tomorrow, Friday, by Thu, 10/31, Oct 31. Add &quot;5 min&quot; for a time estimate.</p>
+  <button id="add">Add to list</button>
+</main>
+
+<script>
+  const list = document.getElementById('list');
+  const count = document.getElementById('count');
+  const dump = document.getElementById('dump');
+  const addBtn = document.getElementById('add');
+
+  function todayIso() {
+    const d = new Date();
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  }
+
+  function dueLabel(due) {
+    if (!due) return { text: 'No deadline', late: false };
+    const today = todayIso();
+    const days = Math.round((Date.parse(due) - Date.parse(today)) / 864e5);
+    if (days < 0) return { text: 'Overdue (' + due.slice(5) + ')', late: true };
+    if (days === 0) return { text: 'Due today', late: true };
+    if (days === 1) return { text: 'Due tomorrow', late: false };
+    const name = new Date(due + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    return { text: 'Due ' + name, late: false };
+  }
+
+  function render(tasks) {
+    list.innerHTML = '';
+    const quick = tasks.filter(t => t.quick).length;
+    count.textContent = tasks.length
+      ? tasks.length + ' open, ' + quick + ' quick win' + (quick === 1 ? '' : 's') + ' (⚡ = ' + 5 + ' min or less)'
+      : 'Nothing open. Enjoy your prep.';
+    if (!tasks.length) {
+      list.innerHTML = '<li class="empty">All clear.</li>';
+      return;
+    }
+    tasks.forEach(t => {
+      const li = document.createElement('li');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.onchange = () => {
+        box.disabled = true;
+        google.script.run.withSuccessHandler(render).withFailureHandler(fail).completeTask(t.id);
+      };
+      const body = document.createElement('div');
+      body.className = 'task';
+      const title = document.createElement('div');
+      title.textContent = (t.quick ? '⚡ ' : '') + t.task;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const due = dueLabel(t.due);
+      const dueSpan = document.createElement('span');
+      dueSpan.textContent = due.text;
+      if (due.late) dueSpan.className = 'late';
+      meta.appendChild(dueSpan);
+      if (t.minutes) meta.appendChild(document.createTextNode(' · ~' + t.minutes + ' min'));
+      if (t.source) meta.appendChild(document.createTextNode(' · ' + t.source));
+      if (t.link) {
+        meta.appendChild(document.createTextNode(' · '));
+        const a = document.createElement('a');
+        a.href = t.link;
+        a.textContent = 'open';
+        a.target = '_blank';
+        meta.appendChild(a);
+      }
+      body.appendChild(title);
+      body.appendChild(meta);
+      li.appendChild(box);
+      li.appendChild(body);
+      list.appendChild(li);
+    });
+  }
+
+  function fail(err) {
+    count.textContent = 'Something went wrong: ' + (err && err.message ? err.message : err);
+    addBtn.disabled = false;
+  }
+
+  addBtn.onclick = () => {
+    if (!dump.value.trim()) return;
+    addBtn.disabled = true;
+    google.script.run
+      .withSuccessHandler(tasks => { dump.value = ''; addBtn.disabled = false; render(tasks); })
+      .withFailureHandler(fail)
+      .addFromBrainDump(dump.value);
+  };
+
+  google.script.run.withSuccessHandler(render).withFailureHandler(fail).getTasks();
+</script>
+</body>
+</html>
