@@ -276,7 +276,7 @@ function gmailTaskFor_(thread, me) {
     parseDue_(body.slice(0, 1500), sent);
 
   // Newsletters and all-staff lists only count when there's a form or a real deadline.
-  if (isBulk_(msg) && !form && !due) return null;
+  if (isBulk_(msg, me) && !form && !due) return null;
 
   const lower = (subject + ' ' + actionLines.join(' ')).toLowerCase();
   let verb = 'Handle';
@@ -329,9 +329,14 @@ function recheckFromMenu() {
   SpreadsheetApp.getUi().alert('Re-check done. Your list went from ' + before + ' to ' + after + ' open tasks.');
 }
 
-function isBulk_(msg) {
+/**
+ * Announcements: mailing lists, all-staff groups, and anything that reached you
+ * by BCC or a group address rather than to you by name.
+ */
+function isBulk_(msg, me) {
   const precedence = (msg.getHeader('Precedence') || '').toLowerCase();
-  return Boolean(msg.getHeader('List-Unsubscribe') || msg.getHeader('List-Id')) ||
+  const toMe = (msg.getTo() + ',' + msg.getCc()).toLowerCase().indexOf(me) >= 0;
+  return !toMe || Boolean(msg.getHeader('List-Unsubscribe') || msg.getHeader('List-Id')) ||
     precedence === 'bulk' || precedence === 'list';
 }
 
