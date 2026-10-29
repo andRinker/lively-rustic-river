@@ -36,6 +36,9 @@
     pre { white-space: pre-wrap; font: 13px/1.4 ui-monospace, Menlo, monospace; color: var(--quiet);
           border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 8px 0; }
     details summary { cursor: pointer; color: var(--accent); }
+    .gist { margin-top: 2px; }
+    .gist.none { color: var(--quiet); font-style: italic; }
+    button.small { margin: 0; padding: 4px 10px; font-size: 13px; font-weight: 600; flex: none; }
   </style>
 </head>
 <body>
@@ -56,26 +59,36 @@
   </details>
   <p class="hint">Tick when done. Click ✕ if something isn't really a task; it won't come back.</p>
 
+  <h2>Need to know <span class="meta" id="knowCount"></span></h2>
+  <ul id="know"></ul>
+  <p class="hint">Announcements and newsletters land here instead of your to-dos. The one-line gists come from the Gemini prompt below. Click "Got it" to clear one.</p>
+
   <h2>Brain dump</h2>
   <textarea id="dump" placeholder="One thing per line, e.g. &quot;order chart paper by Thursday 5 min&quot;"></textarea>
   <p class="hint">Deadlines it understands: today, tomorrow, Friday, by Thu, 10/31, Oct 31. Add &quot;5 min&quot; for a time estimate.</p>
   <button id="add">Add to list</button>
 
   <h2>From Gemini</h2>
-  <p class="hint" style="margin-top:0">For emails the scanner can't make sense of. Copy the prompt, paste it into a new chat at gemini.google.com, then paste Gemini's answer below.</p>
+  <p class="hint" style="margin-top:0">Gemini reads your email the way a person would: it finds the tasks the scanner misses and boils each announcement down to one line. Copy the prompt, paste it into a new chat at gemini.google.com, then paste Gemini's whole answer below.</p>
   <details>
     <summary>Show the prompt</summary>
-    <pre id="prompt">Use @Gmail and @Google Drive. Look at my inbox and the files shared with me from the last 24 hours (go back to Friday if today is Monday). Find everything that asks me to do something: reply, fill out, sign, submit, RSVP, attend, make copies, read and acknowledge, or meet a deadline. Skip lesson planning and grading. Don't include student names.
+    <pre id="prompt">Use @Gmail and @Google Drive. Look at my inbox and the files shared with me from the last 24 hours (go back to Friday if today is Monday). Skip lesson planning and grading. Don't include student names.
 
-Reply ONLY with one line per task in this exact format, with no headings or other text:
-Task | YYYY-MM-DD or none | estimated minutes | where it came from
+1. Find everything that asks me to do something: reply, fill out, sign, submit, RSVP, attend, make copies, read and acknowledge, or meet a deadline. Write one line per task:
+TASK | what to do | YYYY-MM-DD or none | estimated minutes | where it came from
+
+2. For every announcement, newsletter, or all-staff email, write one line saying what I actually need to know (changes, dates, anything that affects my classroom or schedule):
+KNOW | the email's exact subject | one-sentence gist
+
+Reply ONLY with those lines, with no headings or other text.
 
 Example:
-Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez</pre>
+TASK | Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
+KNOW | Weekly Bulletin Oct 27 | Picture day moved to Nov 4, and Friday is early dismissal at 1:30.</pre>
   </details>
   <div class="row"><button id="copy" class="ghost">Copy prompt</button></div>
   <textarea id="gemini" placeholder="Paste Gemini's answer here"></textarea>
-  <button id="addGemini">Add Gemini's tasks</button>
+  <button id="addGemini">Add Gemini's answer</button>
 </main>
 
 <script>
@@ -91,6 +104,52 @@ Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
   const scanned = document.getElementById('scanned');
   const gemini = document.getElementById('gemini');
   const geminiBtn = document.getElementById('addGemini');
+  const knowList = document.getElementById('know');
+  const knowCount = document.getElementById('knowCount');
+
+  function renderKnow(items) {
+    knowList.innerHTML = '';
+    knowCount.textContent = items.length ? '(' + items.length + ')' : '';
+    if (!items.length) {
+      knowList.innerHTML = '<li class="empty">Nothing new.</li>';
+      return;
+    }
+    items.forEach(k => {
+      const li = document.createElement('li');
+      const body = document.createElement('div');
+      body.className = 'task';
+      const head = document.createElement('div');
+      head.style.fontWeight = '600';
+      head.textContent = k.headline;
+      const gist = document.createElement('div');
+      gist.className = k.summary ? 'gist' : 'gist none';
+      gist.textContent = k.summary || 'No gist yet. Run the Gemini prompt below.';
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = [k.source, k.added].filter(Boolean).join(' · ');
+      if (k.link) {
+        meta.appendChild(document.createTextNode(' · '));
+        const a = document.createElement('a');
+        a.href = k.link;
+        a.textContent = 'open';
+        a.target = '_blank';
+        meta.appendChild(a);
+      }
+      const ok = document.createElement('button');
+      ok.className = 'ghost small';
+      ok.textContent = 'Got it';
+      ok.onclick = () => {
+        ok.disabled = true;
+        google.script.run.withSuccessHandler(render).withFailureHandler(fail).setStatus(k.id, 'done');
+      };
+      body.appendChild(head);
+      body.appendChild(gist);
+      body.appendChild(meta);
+      li.appendChild(body);
+      li.appendChild(ok);
+      knowList.appendChild(li);
+    });
+  }
 
   function todayIso() {
     const d = new Date();
@@ -110,6 +169,7 @@ Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
 
   function render(state) {
     const tasks = state.tasks;
+    renderKnow(state.know || []);
     scanned.textContent = state.lastScan ? 'Last scanned ' + state.lastScan : 'Not scanned yet';
     refreshBtn.disabled = false;
     list.innerHTML = '';
@@ -207,7 +267,8 @@ Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
       .withSuccessHandler(state => {
         gemini.value = '';
         geminiBtn.disabled = false;
-        geminiBtn.textContent = 'Added ' + state.added + ' task' + (state.added === 1 ? '' : 's');
+        geminiBtn.textContent = 'Added ' + state.added + ' task' + (state.added === 1 ? '' : 's') +
+          ' and ' + state.gists + ' gist' + (state.gists === 1 ? '' : 's');
         render(state);
       })
       .withFailureHandler(fail)

@@ -4,4 +4,4 @@ Does a teacher's back-office busywork so they show up to prep with a short check
 
 It runs entirely inside the school's Google Workspace: a Google Sheet plus Apps Script, so student data never leaves school Google. Gemini interprets email, data exports feed intervention groups, and a behavior form and a brain-dump box cover everything else.
 
-- `apps-script/`: the hub's code. Start with [`apps-script/SETUP.md`](apps-script/SETUP.md), then [`apps-script/UPDATE-STEP2.md`](apps-script/UPDATE-STEP2.md).
+- `apps-script/`: the hub's code. Start with [`apps-script/SETUP.md`](apps-script/SETUP.md), then [`UPDATE-STEP2.md`](apps-script/UPDATE-STEP2.md) and [`UPDATE-NEED-TO-KNOW.md`](apps-script/UPDATE-NEED-TO-KNOW.md).

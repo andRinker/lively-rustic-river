@@ -7,13 +7,15 @@
  * What it does:
  *   - keeps every to-do in the Tasks sheet
  *   - scans Gmail and Drive every hour for things that need you to act
- *   - takes Gemini's list for the messy emails it can't sort out alone
+ *   - routes announcements to a "Need to know" list instead of your to-dos
+ *   - takes Gemini's tasks and one-line gists of the announcements
  *   - shows one checklist, soonest deadline first, plus a brain-dump box
  */
 
 const TASKS_SHEET = 'Tasks';
-const HEADERS = ['ID', 'Task', 'Due', 'Minutes', 'Source', 'Link', 'Status', 'Added', 'Key'];
-const COL = { id: 0, task: 1, due: 2, minutes: 3, source: 4, link: 5, status: 6, added: 7, key: 8 };
+const HEADERS = ['ID', 'Task', 'Due', 'Minutes', 'Source', 'Link', 'Status', 'Added', 'Key', 'Kind', 'Summary'];
+const COL = { id: 0, task: 1, due: 2, minutes: 3, source: 4, link: 5, status: 6, added: 7, key: 8, kind: 9, summary: 10 };
+const MAX_KNOW_SHOWN = 20;
 const QUICK_MINUTES = 5;
 const FIRST_SCAN_DAYS = 3;
 const MAX_THREADS_PER_SCAN = 75;
@@ -45,7 +47,7 @@ function setup() {
 function ensureTasksSheet_(ss) {
   let sheet = ss.getSheetByName(TASKS_SHEET);
   if (!sheet) sheet = ss.insertSheet(TASKS_SHEET);
-  // Writing the full header row also upgrades a step 1 sheet, which had no Key column.
+  // Writing the full header row also upgrades older sheets that lack the newer columns.
   sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
   sheet.setFrozenRows(1);
   sheet.getRange('C:C').setNumberFormat('ddd mmm d');
@@ -90,14 +92,14 @@ function installTriggers() {
   ScriptApp.newTrigger('scanAll').timeBased().everyHours(1).create();
   const result = scanAll();
   SpreadsheetApp.getUi().alert(
-    'Hourly scan is on.\n\nFirst scan just ran: ' + result.added + ' new task(s) from the last ' +
+    'Hourly scan is on.\n\nFirst scan just ran: ' + result.added + ' new item(s) from the last ' +
       FIRST_SCAN_DAYS + ' days.'
   );
 }
 
 function scanNowFromMenu() {
   const result = scanAll();
-  SpreadsheetApp.getUi().alert('Scan done: ' + result.added + ' new task(s).');
+  SpreadsheetApp.getUi().alert('Scan done: ' + result.added + ' new item(s).');
 }
 
 // ---------- Web page ----------
@@ -118,11 +120,12 @@ function tasksSheet_() {
   return sheetCache_;
 }
 
-/** Everything the page needs: open tasks plus when the last scan ran. */
+/** Everything the page needs: open tasks, announcements, and when the last scan ran. */
 function getState() {
   const last = PropertiesService.getScriptProperties().getProperty('LAST_SCAN');
   return {
     tasks: getTasks(),
+    know: getKnow_(),
     lastScan: last ? Utilities.formatDate(new Date(Number(last)), Session.getScriptTimeZone(), 'EEE h:mm a') : '',
   };
 }
@@ -135,7 +138,7 @@ function getTasks() {
   const tz = Session.getScriptTimeZone();
 
   return rows
-    .filter(r => r[COL.id] && (r[COL.status] === 'open' || r[COL.status] === ''))
+    .filter(r => r[COL.id] && (r[COL.status] === 'open' || r[COL.status] === '') && r[COL.kind] !== 'know')
     .map(r => {
       const due = r[COL.due] instanceof Date ? r[COL.due] : null;
       const minutes = Number(r[COL.minutes]) || null;
@@ -153,6 +156,25 @@ function getTasks() {
       if (a.due && b.due) return a.due < b.due ? -1 : a.due > b.due ? 1 : 0;
       return a.due ? -1 : b.due ? 1 : 0;
     });
+}
+
+/** Announcements you haven't marked "got it" yet, newest first. */
+function getKnow_() {
+  const sheet = tasksSheet_();
+  if (sheet.getLastRow() < 2) return [];
+  const tz = Session.getScriptTimeZone();
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues()
+    .filter(r => r[COL.id] && r[COL.status] === 'open' && r[COL.kind] === 'know')
+    .reverse()
+    .slice(0, MAX_KNOW_SHOWN)
+    .map(r => ({
+      id: String(r[COL.id]),
+      headline: String(r[COL.task]),
+      summary: String(r[COL.summary] || ''),
+      source: String(r[COL.source] || ''),
+      link: String(r[COL.link] || ''),
+      added: r[COL.added] instanceof Date ? Utilities.formatDate(r[COL.added], tz, 'EEE MMM d') : '',
+    }));
 }
 
 /**
@@ -195,6 +217,8 @@ function addTask_(t) {
     'open',
     new Date(),
     t.key || '',
+    t.kind || 'task',
+    t.summary || '',
   ]);
 }
 
@@ -258,7 +282,10 @@ function scanGmail_(since, keys) {
   return tasks;
 }
 
-/** The task an email thread asks of you, or null if it doesn't ask anything. */
+/**
+ * What an email thread is for you: a task (it asks you to do something),
+ * an announcement for "Need to know", or null (nothing for you).
+ */
 function gmailTaskFor_(thread, me) {
   const messages = thread.getMessages();
   const msg = messages[messages.length - 1];
@@ -268,15 +295,25 @@ function gmailTaskFor_(thread, me) {
   const body = msg.getPlainBody().slice(0, 6000);
   const form = body.match(FORM_RE);
   const actionLines = body.split(/[\n.!?]+/).filter(s => ACTION_RE.test(s));
-  if (!form && !ACTION_RE.test(subject) && actionLines.length === 0) return null;
+  const asks = form || ACTION_RE.test(subject) || actionLines.length > 0;
+  const bulk = isBulk_(msg, me);
+  if (!asks && !bulk) return null;
 
   const sent = msg.getDate();
-  const due = parseDue_(subject, sent) ||
+  const due = asks ? (parseDue_(subject, sent) ||
     actionLines.map(s => parseDue_(s, sent)).find(Boolean) ||
-    parseDue_(body.slice(0, 1500), sent);
+    parseDue_(body.slice(0, 1500), sent)) : null;
 
-  // Newsletters and all-staff lists only count when there's a form or a real deadline.
-  if (isBulk_(msg, me) && !form && !due) return null;
+  // Newsletters and all-staff mail go to "Need to know" unless there's a form or a real deadline.
+  if (bulk && !form && !due) {
+    return {
+      kind: 'know',
+      task: truncate_(subject, 120),
+      source: senderName_(msg.getFrom()),
+      link: 'https://mail.google.com/mail/u/0/#all/' + thread.getId(),
+      key: 'gmail:' + thread.getId(),
+    };
+  }
 
   const lower = (subject + ' ' + actionLines.join(' ')).toLowerCase();
   let verb = 'Handle';
@@ -295,12 +332,14 @@ function gmailTaskFor_(thread, me) {
     source: 'Email from ' + senderName_(msg.getFrom()),
     link: form ? form[0] : 'https://mail.google.com/mail/u/0/#all/' + thread.getId(),
     key: 'gmail:' + thread.getId(),
+    kind: 'task',
   };
 }
 
 /**
- * Runs today's rules over the email tasks already on your list, and marks
- * the ones the rules would now skip as "filtered". Use it after the rules change.
+ * Runs today's rules over the email items already in the sheet (open or filtered
+ * by an older rule): each becomes a task, a "Need to know" item, or "filtered".
+ * Use it after the rules change.
  */
 function recheckOpenTasks() {
   const sheet = tasksSheet_();
@@ -311,13 +350,19 @@ function recheckOpenTasks() {
   let removed = 0;
   rows.forEach((r, i) => {
     const key = String(r[COL.key] || '');
-    if (r[COL.status] !== 'open' || key.indexOf('gmail:') !== 0) return;
+    if ((r[COL.status] !== 'open' && r[COL.status] !== 'filtered') || key.indexOf('gmail:') !== 0) return;
     let thread = null;
     try { thread = GmailApp.getThreadById(key.slice(6)); } catch (e) { /* deleted */ }
-    if (thread && !gmailTaskFor_(thread, me)) {
+    if (!thread) return;
+    const item = gmailTaskFor_(thread, me);
+    if (!item) {
+      if (r[COL.status] === 'open') removed++;
       sheet.getRange(i + 2, COL.status + 1).setValue('filtered');
-      removed++;
+      return;
     }
+    sheet.getRange(i + 2, COL.status + 1).setValue('open');
+    sheet.getRange(i + 2, COL.kind + 1).setValue(item.kind);
+    if (item.kind === 'know') sheet.getRange(i + 2, COL.task + 1).setValue(item.task);
   });
   return removed;
 }
@@ -326,7 +371,8 @@ function recheckFromMenu() {
   const before = getTasks().length;
   recheckOpenTasks();
   const after = getTasks().length;
-  SpreadsheetApp.getUi().alert('Re-check done. Your list went from ' + before + ' to ' + after + ' open tasks.');
+  SpreadsheetApp.getUi().alert('Re-check done. Your to-do list went from ' + before + ' to ' + after +
+    ' tasks. Announcements are now under "Need to know" (' + getKnow_().length + ').');
 }
 
 /**
@@ -406,21 +452,46 @@ function truncate_(s, n) {
 // ---------- Gemini ----------
 
 /**
- * Takes Gemini's reply and adds each task line.
- * Expected line format (the prompt on the page asks for exactly this):
- *   Task | YYYY-MM-DD or none | minutes | source
+ * Takes Gemini's reply. The prompt on the page asks for two kinds of lines:
+ *   TASK | what to do | YYYY-MM-DD or none | minutes | where it came from
+ *   KNOW | the email's exact subject | one-sentence gist
+ * A KNOW line fills in the gist of the matching "Need to know" item, or adds one.
+ * Lines without a TASK/KNOW label are read as tasks.
  */
 function addFromGemini(text) {
+  const sheet = tasksSheet_();
   const keys = existingKeys_();
   const now = new Date();
   let added = 0;
+  let gists = 0;
 
   String(text || '').split('\n').forEach(raw => {
-    const line = raw.replace(/^\s*(?:[-*•☐]|\d+[.)])\s*/, '').trim();
-    const parts = line.split('|').map(s => s.trim());
-    if (parts.length < 2 || !parts[0] || /^task$/i.test(parts[0])) return;
+    const line = raw.replace(/^\s*(?:[-*•☐]|\d+[.)])\s*/, '').replace(/\*\*/g, '').trim();
+    let parts = line.split('|').map(s => s.trim());
+    if (parts.length < 2 || !parts[0]) return;
 
-    const key = 'gemini:' + parts[0].toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const label = parts[0].toUpperCase();
+    if (label === 'KNOW') {
+      const subject = parts[1] || '';
+      const gist = parts.slice(2).join(' | ');
+      if (!subject || /^(the )?email'?s exact subject$/i.test(subject)) return;
+      const row = findKnowRow_(sheet, subject);
+      if (row) {
+        sheet.getRange(row, COL.summary + 1).setValue(gist);
+        gists++;
+        return;
+      }
+      const key = 'gemini-know:' + normalize_(subject);
+      if (keys.has(key)) return;
+      keys.add(key);
+      addTask_({ kind: 'know', task: subject, summary: gist, source: 'Gemini', key: key });
+      gists++;
+      return;
+    }
+
+    if (label === 'TASK') parts = parts.slice(1);
+    if (!parts[0] || /^(task|what to do)$/i.test(parts[0])) return;
+    const key = 'gemini:' + normalize_(parts[0]);
     if (keys.has(key)) return;
     keys.add(key);
 
@@ -437,7 +508,27 @@ function addFromGemini(text) {
 
   const state = getState();
   state.added = added;
+  state.gists = gists;
   return state;
+}
+
+/** Sheet row number of the open "Need to know" item whose subject matches, or 0. */
+function findKnowRow_(sheet, subject) {
+  if (sheet.getLastRow() < 2) return 0;
+  const want = normalize_(subject.replace(/^(re|fwd?):\s*/i, ''));
+  if (want.length < 4) return 0;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (r[COL.kind] !== 'know' || r[COL.status] !== 'open') continue;
+    const have = normalize_(String(r[COL.task]).replace(/^(re|fwd?):\s*/i, ''));
+    if (have && (have.indexOf(want) >= 0 || want.indexOf(have) >= 0)) return i + 2;
+  }
+  return 0;
+}
+
+function normalize_(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 // ---------- Parsing helpers ----------
