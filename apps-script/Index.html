@@ -50,6 +50,10 @@
 
   <h2>To do this prep</h2>
   <ul id="list"></ul>
+  <details id="laterBox" hidden>
+    <summary id="laterSum"></summary>
+    <ul id="later"></ul>
+  </details>
   <p class="hint">Tick when done. Click ✕ if something isn't really a task; it won't come back.</p>
 
   <h2>Brain dump</h2>
@@ -75,7 +79,11 @@ Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
 </main>
 
 <script>
+  const SHOW_FIRST = 10;
   const list = document.getElementById('list');
+  const later = document.getElementById('later');
+  const laterBox = document.getElementById('laterBox');
+  const laterSum = document.getElementById('laterSum');
   const count = document.getElementById('count');
   const dump = document.getElementById('dump');
   const addBtn = document.getElementById('add');
@@ -105,6 +113,9 @@ Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
     scanned.textContent = state.lastScan ? 'Last scanned ' + state.lastScan : 'Not scanned yet';
     refreshBtn.disabled = false;
     list.innerHTML = '';
+    later.innerHTML = '';
+    laterBox.hidden = tasks.length <= SHOW_FIRST;
+    laterSum.textContent = 'Later (' + Math.max(0, tasks.length - SHOW_FIRST) + ' more)';
     const quick = tasks.filter(t => t.quick).length;
     count.textContent = tasks.length
       ? tasks.length + ' open, ' + quick + ' quick win' + (quick === 1 ? '' : 's') + ' (⚡ = ' + 5 + ' min or less)'
@@ -113,7 +124,7 @@ Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
       list.innerHTML = '<li class="empty">All clear.</li>';
       return;
     }
-    tasks.forEach(t => {
+    tasks.forEach((t, i) => {
       const li = document.createElement('li');
       const box = document.createElement('input');
       box.type = 'checkbox';
@@ -155,7 +166,7 @@ Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
       li.appendChild(box);
       li.appendChild(body);
       li.appendChild(x);
-      list.appendChild(li);
+      (i < SHOW_FIRST ? list : later).appendChild(li);
     });
   }
 

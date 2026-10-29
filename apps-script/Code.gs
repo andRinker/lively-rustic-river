@@ -28,6 +28,7 @@ function onOpen() {
     .addItem('3. Turn on hourly scan', 'installTriggers')
     .addSeparator()
     .addItem('Scan Gmail and Drive now', 'scanNowFromMenu')
+    .addItem('Re-check my list with the latest rules', 'recheckFromMenu')
     .addToUi();
 }
 
@@ -218,6 +219,7 @@ function scanAll() {
     const last = Number(props.getProperty('LAST_SCAN')) || 0;
     // Overlap by an hour so nothing slips between runs; keys stop duplicates.
     const since = last ? new Date(last - 60 * 60 * 1000) : new Date(Date.now() - FIRST_SCAN_DAYS * 864e5);
+    autoClose_();
     const keys = existingKeys_();
     const found = scanGmail_(since, keys).concat(scanDrive_(since, keys));
     found.forEach(addTask_);
@@ -233,8 +235,9 @@ function refreshNow() {
   return scanAll().state;
 }
 
-// Words that usually mean an email wants something from you.
-const ACTION_RE = /\b(please|kindly|reminder|due|deadline|submit|complete|fill out|fill in|sign|signature|rsvp|respond|reply|no later than|required|mandatory|action (?:needed|required)|need(?:ed)? from you|make sure|don't forget|do not forget|turn in|register|sign up|by (?:mon|tues|wednes|thurs|fri)day|by end of day|eod)\b/i;
+// Words that mean an email wants something from you. Soft words like "please" and
+// "reminder" are left out on purpose: announcements use them constantly.
+const ACTION_RE = /\b(due|deadline|submit|fill out|fill in|sign|signature|rsvp|respond by|reply by|please (?:reply|respond|confirm|complete|let me know)|no later than|action (?:needed|required)|need(?:ed)? from you|turn in|register|sign up|by (?:mon|tues|wednes|thurs|fri)day|by end of day|eod)\b/i;
 const FORM_RE = /https:\/\/(?:forms\.gle\/[\w-]+|docs\.google\.com\/forms\/[^\s"'<>)]+)/i;
 
 function scanGmail_(since, keys) {
@@ -246,44 +249,117 @@ function scanGmail_(since, keys) {
   GmailApp.search(query, 0, MAX_THREADS_PER_SCAN).forEach(thread => {
     const key = 'gmail:' + thread.getId();
     if (keys.has(key)) return;
-
-    const messages = thread.getMessages();
-    const msg = messages[messages.length - 1];
-    if (msg.getFrom().toLowerCase().indexOf(me) >= 0) return; // you already replied last
-
-    const subject = msg.getSubject() || '(no subject)';
-    const body = msg.getPlainBody().slice(0, 6000);
-    const form = body.match(FORM_RE);
-    const actionLines = body.split(/[\n.!?]+/).filter(s => ACTION_RE.test(s));
-    if (!form && !ACTION_RE.test(subject) && actionLines.length === 0) return;
-
-    const sent = msg.getDate();
-    const due = parseDue_(subject, sent) ||
-      actionLines.map(s => parseDue_(s, sent)).find(Boolean) ||
-      parseDue_(body.slice(0, 1500), sent);
-    const lower = (subject + ' ' + actionLines.join(' ')).toLowerCase();
-
-    let verb = 'Handle';
-    let minutes = null;
-    if (form) { verb = 'Fill out form'; minutes = 5; }
-    else if (/\brsvp\b/.test(lower)) { verb = 'RSVP'; minutes = 2; }
-    else if (/\bsign(ature)?\b/.test(lower)) { verb = 'Sign'; minutes = 5; }
-    else if (/\b(reply|respond)\b/.test(lower)) { verb = 'Reply'; minutes = 5; }
-    else if (/\b(submit|turn in)\b/.test(lower)) { verb = 'Submit'; }
-    else if (/\b(register|sign up)\b/.test(lower)) { verb = 'Sign up'; minutes = 5; }
-
+    const task = gmailTaskFor_(thread, me);
+    if (!task) return;
     keys.add(key);
-    tasks.push({
-      task: verb + ': ' + truncate_(subject, 90),
-      due: due,
-      minutes: minutes,
-      source: 'Email from ' + senderName_(msg.getFrom()),
-      link: form ? form[0] : 'https://mail.google.com/mail/u/0/#all/' + thread.getId(),
-      key: key,
-    });
+    tasks.push(task);
   });
 
   return tasks;
+}
+
+/** The task an email thread asks of you, or null if it doesn't ask anything. */
+function gmailTaskFor_(thread, me) {
+  const messages = thread.getMessages();
+  const msg = messages[messages.length - 1];
+  if (msg.getFrom().toLowerCase().indexOf(me) >= 0) return null; // you already replied last
+
+  const subject = msg.getSubject() || '(no subject)';
+  const body = msg.getPlainBody().slice(0, 6000);
+  const form = body.match(FORM_RE);
+  const actionLines = body.split(/[\n.!?]+/).filter(s => ACTION_RE.test(s));
+  if (!form && !ACTION_RE.test(subject) && actionLines.length === 0) return null;
+
+  const sent = msg.getDate();
+  const due = parseDue_(subject, sent) ||
+    actionLines.map(s => parseDue_(s, sent)).find(Boolean) ||
+    parseDue_(body.slice(0, 1500), sent);
+
+  // Newsletters and all-staff lists only count when there's a form or a real deadline.
+  if (isBulk_(msg) && !form && !due) return null;
+
+  const lower = (subject + ' ' + actionLines.join(' ')).toLowerCase();
+  let verb = 'Handle';
+  let minutes = null;
+  if (form) { verb = 'Fill out form'; minutes = 5; }
+  else if (/\brsvp\b/.test(lower)) { verb = 'RSVP'; minutes = 2; }
+  else if (/\bsign(ature)?\b/.test(lower)) { verb = 'Sign'; minutes = 5; }
+  else if (/\b(reply|respond)\b/.test(lower)) { verb = 'Reply'; minutes = 5; }
+  else if (/\b(submit|turn in)\b/.test(lower)) { verb = 'Submit'; }
+  else if (/\b(register|sign up)\b/.test(lower)) { verb = 'Sign up'; minutes = 5; }
+
+  return {
+    task: verb + ': ' + truncate_(subject, 90),
+    due: due,
+    minutes: minutes,
+    source: 'Email from ' + senderName_(msg.getFrom()),
+    link: form ? form[0] : 'https://mail.google.com/mail/u/0/#all/' + thread.getId(),
+    key: 'gmail:' + thread.getId(),
+  };
+}
+
+/**
+ * Runs today's rules over the email tasks already on your list, and marks
+ * the ones the rules would now skip as "filtered". Use it after the rules change.
+ */
+function recheckOpenTasks() {
+  const sheet = tasksSheet_();
+  if (sheet.getLastRow() < 2) return 0;
+  autoClose_();
+  const me = Session.getActiveUser().getEmail().toLowerCase();
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
+  let removed = 0;
+  rows.forEach((r, i) => {
+    const key = String(r[COL.key] || '');
+    if (r[COL.status] !== 'open' || key.indexOf('gmail:') !== 0) return;
+    let thread = null;
+    try { thread = GmailApp.getThreadById(key.slice(6)); } catch (e) { /* deleted */ }
+    if (thread && !gmailTaskFor_(thread, me)) {
+      sheet.getRange(i + 2, COL.status + 1).setValue('filtered');
+      removed++;
+    }
+  });
+  return removed;
+}
+
+function recheckFromMenu() {
+  const before = getTasks().length;
+  recheckOpenTasks();
+  const after = getTasks().length;
+  SpreadsheetApp.getUi().alert('Re-check done. Your list went from ' + before + ' to ' + after + ' open tasks.');
+}
+
+function isBulk_(msg) {
+  const precedence = (msg.getHeader('Precedence') || '').toLowerCase();
+  return Boolean(msg.getHeader('List-Unsubscribe') || msg.getHeader('List-Id')) ||
+    precedence === 'bulk' || precedence === 'list';
+}
+
+/**
+ * Closes email tasks you've clearly dealt with: you replied last, or the
+ * email is no longer in your inbox (archived or deleted). They're marked
+ * "auto-done" in the Tasks sheet, so you can reopen one by changing it to "open".
+ */
+function autoClose_() {
+  const sheet = tasksSheet_();
+  if (sheet.getLastRow() < 2) return;
+  const me = Session.getActiveUser().getEmail().toLowerCase();
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
+  let checked = 0;
+
+  rows.forEach((r, i) => {
+    const key = String(r[COL.key] || '');
+    if (r[COL.status] !== 'open' || key.indexOf('gmail:') !== 0 || checked >= 100) return;
+    checked++;
+    let thread = null;
+    try { thread = GmailApp.getThreadById(key.slice(6)); } catch (e) { /* deleted */ }
+    let handled = !thread || !thread.isInInbox();
+    if (!handled) {
+      const messages = thread.getMessages();
+      handled = messages[messages.length - 1].getFrom().toLowerCase().indexOf(me) >= 0;
+    }
+    if (handled) sheet.getRange(i + 2, COL.status + 1).setValue('auto-done');
+  });
 }
 
 /** Files someone shared with you or changed since the last scan. */
