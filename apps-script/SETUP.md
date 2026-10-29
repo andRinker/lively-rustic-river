@@ -15,7 +15,8 @@ Do all of this while signed in to your **school** Google account.
 1. Go back to the spreadsheet tab and reload the page. A **Prep Prepper** menu appears at the top, next to Help.
 2. Click **Prep Prepper > 1. Set up**. Google asks you to authorize the script. Click through the prompts.
    If you see "Google hasn't verified this app", click **Advanced > Go to Prep Prepper**. That's normal for a script you wrote yourself.
-3. Click **Prep Prepper > 2. Test Gmail and Drive access**, authorize again, and **tell Claude what the pop-up says** (OK or BLOCKED for each).
+3. Click **Prep Prepper > 2. Test Gmail and Drive access** and authorize again. The pop-up should say OK for both.
+4. Click **Prep Prepper > 3. Turn on hourly scan**. The first scan runs right away.
 
 ## 4. Turn on the web page
 1. In the Apps Script tab, click **Deploy > New deployment**.

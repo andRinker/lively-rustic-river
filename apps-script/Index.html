@@ -28,6 +28,14 @@
     .late { color: var(--late); font-weight: 600; }
     a { color: var(--accent); }
     .empty { color: var(--quiet); padding: 12px 0; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .row button { margin-top: 0; }
+    button.ghost { color: var(--accent); background: transparent; border: 1px solid var(--line); }
+    .x { margin: 0; padding: 0 6px; font-size: 18px; line-height: 1; color: var(--quiet);
+         background: transparent; font-weight: 400; flex: none; }
+    pre { white-space: pre-wrap; font: 13px/1.4 ui-monospace, Menlo, monospace; color: var(--quiet);
+          border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 8px 0; }
+    details summary { cursor: pointer; color: var(--accent); }
   </style>
 </head>
 <body>
@@ -35,13 +43,35 @@
   <h1>Prep Prepper</h1>
   <p class="sub" id="count">Loading your list…</p>
 
+  <div class="row">
+    <button id="refresh" class="ghost">Scan Gmail and Drive now</button>
+    <span class="meta" id="scanned"></span>
+  </div>
+
   <h2>To do this prep</h2>
   <ul id="list"></ul>
+  <p class="hint">Tick when done. Click ✕ if something isn't really a task; it won't come back.</p>
 
   <h2>Brain dump</h2>
   <textarea id="dump" placeholder="One thing per line, e.g. &quot;order chart paper by Thursday 5 min&quot;"></textarea>
   <p class="hint">Deadlines it understands: today, tomorrow, Friday, by Thu, 10/31, Oct 31. Add &quot;5 min&quot; for a time estimate.</p>
   <button id="add">Add to list</button>
+
+  <h2>From Gemini</h2>
+  <p class="hint" style="margin-top:0">For emails the scanner can't make sense of. Copy the prompt, paste it into a new chat at gemini.google.com, then paste Gemini's answer below.</p>
+  <details>
+    <summary>Show the prompt</summary>
+    <pre id="prompt">Use @Gmail and @Google Drive. Look at my inbox and the files shared with me from the last 24 hours (go back to Friday if today is Monday). Find everything that asks me to do something: reply, fill out, sign, submit, RSVP, attend, make copies, read and acknowledge, or meet a deadline. Skip lesson planning and grading. Don't include student names.
+
+Reply ONLY with one line per task in this exact format, with no headings or other text:
+Task | YYYY-MM-DD or none | estimated minutes | where it came from
+
+Example:
+Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez</pre>
+  </details>
+  <div class="row"><button id="copy" class="ghost">Copy prompt</button></div>
+  <textarea id="gemini" placeholder="Paste Gemini's answer here"></textarea>
+  <button id="addGemini">Add Gemini's tasks</button>
 </main>
 
 <script>
@@ -49,6 +79,10 @@
   const count = document.getElementById('count');
   const dump = document.getElementById('dump');
   const addBtn = document.getElementById('add');
+  const refreshBtn = document.getElementById('refresh');
+  const scanned = document.getElementById('scanned');
+  const gemini = document.getElementById('gemini');
+  const geminiBtn = document.getElementById('addGemini');
 
   function todayIso() {
     const d = new Date();
@@ -66,7 +100,10 @@
     return { text: 'Due ' + name, late: false };
   }
 
-  function render(tasks) {
+  function render(state) {
+    const tasks = state.tasks;
+    scanned.textContent = state.lastScan ? 'Last scanned ' + state.lastScan : 'Not scanned yet';
+    refreshBtn.disabled = false;
     list.innerHTML = '';
     const quick = tasks.filter(t => t.quick).length;
     count.textContent = tasks.length
@@ -82,7 +119,15 @@
       box.type = 'checkbox';
       box.onchange = () => {
         box.disabled = true;
-        google.script.run.withSuccessHandler(render).withFailureHandler(fail).completeTask(t.id);
+        google.script.run.withSuccessHandler(render).withFailureHandler(fail).setStatus(t.id, 'done');
+      };
+      const x = document.createElement('button');
+      x.className = 'x';
+      x.title = 'Not a task';
+      x.textContent = '✕';
+      x.onclick = () => {
+        x.disabled = true;
+        google.script.run.withSuccessHandler(render).withFailureHandler(fail).setStatus(t.id, 'dismissed');
       };
       const body = document.createElement('div');
       body.className = 'task';
@@ -109,6 +154,7 @@
       body.appendChild(meta);
       li.appendChild(box);
       li.appendChild(body);
+      li.appendChild(x);
       list.appendChild(li);
     });
   }
@@ -116,18 +162,48 @@
   function fail(err) {
     count.textContent = 'Something went wrong: ' + (err && err.message ? err.message : err);
     addBtn.disabled = false;
+    refreshBtn.disabled = false;
+    geminiBtn.disabled = false;
   }
 
   addBtn.onclick = () => {
     if (!dump.value.trim()) return;
     addBtn.disabled = true;
     google.script.run
-      .withSuccessHandler(tasks => { dump.value = ''; addBtn.disabled = false; render(tasks); })
+      .withSuccessHandler(state => { dump.value = ''; addBtn.disabled = false; render(state); })
       .withFailureHandler(fail)
       .addFromBrainDump(dump.value);
   };
 
-  google.script.run.withSuccessHandler(render).withFailureHandler(fail).getTasks();
+  refreshBtn.onclick = () => {
+    refreshBtn.disabled = true;
+    scanned.textContent = 'Scanning…';
+    google.script.run.withSuccessHandler(render).withFailureHandler(fail).refreshNow();
+  };
+
+  document.getElementById('copy').onclick = e => {
+    const text = document.getElementById('prompt').textContent;
+    navigator.clipboard.writeText(text).then(
+      () => { e.target.textContent = 'Copied'; },
+      () => { document.querySelector('details').open = true; e.target.textContent = 'Select the prompt above and copy it'; }
+    );
+  };
+
+  geminiBtn.onclick = () => {
+    if (!gemini.value.trim()) return;
+    geminiBtn.disabled = true;
+    google.script.run
+      .withSuccessHandler(state => {
+        gemini.value = '';
+        geminiBtn.disabled = false;
+        geminiBtn.textContent = 'Added ' + state.added + ' task' + (state.added === 1 ? '' : 's');
+        render(state);
+      })
+      .withFailureHandler(fail)
+      .addFromGemini(gemini.value);
+  };
+
+  google.script.run.withSuccessHandler(render).withFailureHandler(fail).getState();
 </script>
 </body>
 </html>

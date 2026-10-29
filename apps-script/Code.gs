@@ -1,19 +1,22 @@
 /**
- * Prep Prepper hub, step 1.
+ * Prep Prepper hub.
  *
  * Lives inside a Google Sheet (Extensions > Apps Script) in your school
  * account. Nothing here sends data outside school Google.
  *
- * Step 1 gives you:
- *   - a Tasks sheet that holds every to-do
- *   - a web page with your checklist (soonest deadline first) and a brain-dump box
- *   - a one-time test that checks whether your district lets scripts read Gmail and Drive
+ * What it does:
+ *   - keeps every to-do in the Tasks sheet
+ *   - scans Gmail and Drive every hour for things that need you to act
+ *   - takes Gemini's list for the messy emails it can't sort out alone
+ *   - shows one checklist, soonest deadline first, plus a brain-dump box
  */
 
 const TASKS_SHEET = 'Tasks';
-const HEADERS = ['ID', 'Task', 'Due', 'Minutes', 'Source', 'Link', 'Status', 'Added'];
-const COL = { id: 0, task: 1, due: 2, minutes: 3, source: 4, link: 5, status: 6, added: 7 };
+const HEADERS = ['ID', 'Task', 'Due', 'Minutes', 'Source', 'Link', 'Status', 'Added', 'Key'];
+const COL = { id: 0, task: 1, due: 2, minutes: 3, source: 4, link: 5, status: 6, added: 7, key: 8 };
 const QUICK_MINUTES = 5;
+const FIRST_SCAN_DAYS = 3;
+const MAX_THREADS_PER_SCAN = 75;
 
 // ---------- Menu and setup ----------
 
@@ -22,6 +25,9 @@ function onOpen() {
     .createMenu('Prep Prepper')
     .addItem('1. Set up', 'setup')
     .addItem('2. Test Gmail and Drive access', 'testAccess')
+    .addItem('3. Turn on hourly scan', 'installTriggers')
+    .addSeparator()
+    .addItem('Scan Gmail and Drive now', 'scanNowFromMenu')
     .addToUi();
 }
 
@@ -29,19 +35,20 @@ function onOpen() {
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   PropertiesService.getScriptProperties().setProperty('HUB_ID', ss.getId());
+  ensureTasksSheet_(ss);
+  SpreadsheetApp.getUi().alert(
+    'Prep Prepper is set up.\n\nNext: run "3. Turn on hourly scan" from the Prep Prepper menu.'
+  );
+}
 
+function ensureTasksSheet_(ss) {
   let sheet = ss.getSheetByName(TASKS_SHEET);
   if (!sheet) sheet = ss.insertSheet(TASKS_SHEET);
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(HEADERS);
-    sheet.setFrozenRows(1);
-    sheet.getRange(1, 1, 1, HEADERS.length).setFontWeight('bold');
-    sheet.getRange('C:C').setNumberFormat('ddd mmm d');
-  }
-
-  SpreadsheetApp.getUi().alert(
-    'Prep Prepper is set up.\n\nNext: run "2. Test Gmail and Drive access" from the Prep Prepper menu.'
-  );
+  // Writing the full header row also upgrades a step 1 sheet, which had no Key column.
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  sheet.getRange('C:C').setNumberFormat('ddd mmm d');
+  return sheet;
 }
 
 /**
@@ -74,6 +81,24 @@ function testAccess() {
   SpreadsheetApp.getUi().alert('Access test\n\n' + lines.join('\n'));
 }
 
+/** Runs scanAll every hour, so the list is fresh before any prep. */
+function installTriggers() {
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'scanAll')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('scanAll').timeBased().everyHours(1).create();
+  const result = scanAll();
+  SpreadsheetApp.getUi().alert(
+    'Hourly scan is on.\n\nFirst scan just ran: ' + result.added + ' new task(s) from the last ' +
+      FIRST_SCAN_DAYS + ' days.'
+  );
+}
+
+function scanNowFromMenu() {
+  const result = scanAll();
+  SpreadsheetApp.getUi().alert('Scan done: ' + result.added + ' new task(s).');
+}
+
 // ---------- Web page ----------
 
 function doGet() {
@@ -82,10 +107,23 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+let sheetCache_ = null;
+
 function tasksSheet_() {
+  if (sheetCache_) return sheetCache_;
   const id = PropertiesService.getScriptProperties().getProperty('HUB_ID');
   if (!id) throw new Error('Open the spreadsheet and run Prep Prepper > 1. Set up first.');
-  return SpreadsheetApp.openById(id).getSheetByName(TASKS_SHEET);
+  sheetCache_ = SpreadsheetApp.openById(id).getSheetByName(TASKS_SHEET);
+  return sheetCache_;
+}
+
+/** Everything the page needs: open tasks plus when the last scan ran. */
+function getState() {
+  const last = PropertiesService.getScriptProperties().getProperty('LAST_SCAN');
+  return {
+    tasks: getTasks(),
+    lastScan: last ? Utilities.formatDate(new Date(Number(last)), Session.getScriptTimeZone(), 'EEE h:mm a') : '',
+  };
 }
 
 /** Open tasks, soonest deadline first; tasks with no deadline go last. */
@@ -96,7 +134,7 @@ function getTasks() {
   const tz = Session.getScriptTimeZone();
 
   return rows
-    .filter(r => r[COL.id] && r[COL.status] !== 'done')
+    .filter(r => r[COL.id] && (r[COL.status] === 'open' || r[COL.status] === ''))
     .map(r => {
       const due = r[COL.due] instanceof Date ? r[COL.due] : null;
       const minutes = Number(r[COL.minutes]) || null;
@@ -122,31 +160,203 @@ function getTasks() {
  * and time estimates like "5 min".
  */
 function addFromBrainDump(text) {
-  const sheet = tasksSheet_();
-  const lines = String(text || '').split('\n').map(s => s.trim()).filter(Boolean);
   const now = new Date();
-  lines.forEach(line => {
-    sheet.appendRow([
-      Utilities.getUuid(),
-      line,
-      parseDue_(line, now) || '',
-      parseMinutes_(line) || '',
-      'Brain dump',
-      '',
-      'open',
-      now,
-    ]);
+  String(text || '').split('\n').map(s => s.trim()).filter(Boolean).forEach(line => {
+    addTask_({
+      task: line,
+      due: parseDue_(line, now),
+      minutes: parseMinutes_(line),
+      source: 'Brain dump',
+    });
   });
-  return getTasks();
+  return getState();
 }
 
-function completeTask(id) {
+/** "done" when finished, "dismissed" when it was never a real task. Either way it never comes back. */
+function setStatus(id, status) {
+  if (status !== 'done' && status !== 'dismissed') throw new Error('Unknown status: ' + status);
   const sheet = tasksSheet_();
-  if (sheet.getLastRow() < 2) return getTasks();
+  if (sheet.getLastRow() < 2) return getState();
   const ids = sheet.getRange(2, COL.id + 1, sheet.getLastRow() - 1, 1).getValues();
   const i = ids.findIndex(r => String(r[0]) === String(id));
-  if (i >= 0) sheet.getRange(i + 2, COL.status + 1).setValue('done');
-  return getTasks();
+  if (i >= 0) sheet.getRange(i + 2, COL.status + 1).setValue(status);
+  return getState();
+}
+
+function addTask_(t) {
+  tasksSheet_().appendRow([
+    Utilities.getUuid(),
+    t.task,
+    t.due || '',
+    t.minutes || '',
+    t.source || '',
+    t.link || '',
+    'open',
+    new Date(),
+    t.key || '',
+  ]);
+}
+
+/** Keys of every task ever added, open or not, so nothing gets added twice. */
+function existingKeys_() {
+  const sheet = tasksSheet_();
+  const keys = new Set();
+  if (sheet.getLastRow() < 2) return keys;
+  sheet.getRange(2, COL.key + 1, sheet.getLastRow() - 1, 1).getValues()
+    .forEach(r => { if (r[0]) keys.add(String(r[0])); });
+  return keys;
+}
+
+// ---------- Scanning Gmail and Drive ----------
+
+/** Scans everything since the last scan. Runs hourly, and from the page's Refresh button. */
+function scanAll() {
+  const props = PropertiesService.getScriptProperties();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30 * 1000)) return { added: 0, state: getState() };
+  try {
+    const last = Number(props.getProperty('LAST_SCAN')) || 0;
+    // Overlap by an hour so nothing slips between runs; keys stop duplicates.
+    const since = last ? new Date(last - 60 * 60 * 1000) : new Date(Date.now() - FIRST_SCAN_DAYS * 864e5);
+    const keys = existingKeys_();
+    const found = scanGmail_(since, keys).concat(scanDrive_(since, keys));
+    found.forEach(addTask_);
+    props.setProperty('LAST_SCAN', String(Date.now()));
+    return { added: found.length, state: getState() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** For the page's Refresh button. */
+function refreshNow() {
+  return scanAll().state;
+}
+
+// Words that usually mean an email wants something from you.
+const ACTION_RE = /\b(please|kindly|reminder|due|deadline|submit|complete|fill out|fill in|sign|signature|rsvp|respond|reply|no later than|required|mandatory|action (?:needed|required)|need(?:ed)? from you|make sure|don't forget|do not forget|turn in|register|sign up|by (?:mon|tues|wednes|thurs|fri)day|by end of day|eod)\b/i;
+const FORM_RE = /https:\/\/(?:forms\.gle\/[\w-]+|docs\.google\.com\/forms\/[^\s"'<>)]+)/i;
+
+function scanGmail_(since, keys) {
+  const me = Session.getActiveUser().getEmail().toLowerCase();
+  const query = 'in:inbox after:' + Math.floor(since.getTime() / 1000) +
+    ' -category:promotions -category:social -from:me';
+  const tasks = [];
+
+  GmailApp.search(query, 0, MAX_THREADS_PER_SCAN).forEach(thread => {
+    const key = 'gmail:' + thread.getId();
+    if (keys.has(key)) return;
+
+    const messages = thread.getMessages();
+    const msg = messages[messages.length - 1];
+    if (msg.getFrom().toLowerCase().indexOf(me) >= 0) return; // you already replied last
+
+    const subject = msg.getSubject() || '(no subject)';
+    const body = msg.getPlainBody().slice(0, 6000);
+    const form = body.match(FORM_RE);
+    const actionLines = body.split(/[\n.!?]+/).filter(s => ACTION_RE.test(s));
+    if (!form && !ACTION_RE.test(subject) && actionLines.length === 0) return;
+
+    const sent = msg.getDate();
+    const due = parseDue_(subject, sent) ||
+      actionLines.map(s => parseDue_(s, sent)).find(Boolean) ||
+      parseDue_(body.slice(0, 1500), sent);
+    const lower = (subject + ' ' + actionLines.join(' ')).toLowerCase();
+
+    let verb = 'Handle';
+    let minutes = null;
+    if (form) { verb = 'Fill out form'; minutes = 5; }
+    else if (/\brsvp\b/.test(lower)) { verb = 'RSVP'; minutes = 2; }
+    else if (/\bsign(ature)?\b/.test(lower)) { verb = 'Sign'; minutes = 5; }
+    else if (/\b(reply|respond)\b/.test(lower)) { verb = 'Reply'; minutes = 5; }
+    else if (/\b(submit|turn in)\b/.test(lower)) { verb = 'Submit'; }
+    else if (/\b(register|sign up)\b/.test(lower)) { verb = 'Sign up'; minutes = 5; }
+
+    keys.add(key);
+    tasks.push({
+      task: verb + ': ' + truncate_(subject, 90),
+      due: due,
+      minutes: minutes,
+      source: 'Email from ' + senderName_(msg.getFrom()),
+      link: form ? form[0] : 'https://mail.google.com/mail/u/0/#all/' + thread.getId(),
+      key: key,
+    });
+  });
+
+  return tasks;
+}
+
+/** Files someone shared with you or changed since the last scan. */
+function scanDrive_(since, keys) {
+  const tasks = [];
+  const files = DriveApp.searchFiles(
+    'sharedWithMe and modifiedDate > "' + since.toISOString() + '" and trashed = false'
+  );
+  let n = 0;
+  while (files.hasNext() && n < 50) {
+    const file = files.next();
+    n++;
+    const key = 'drive:' + file.getId(); // once per file, so busy shared docs don't pile up
+    if (keys.has(key)) continue;
+    let owner = '';
+    try { owner = file.getOwner() ? file.getOwner().getName() : ''; } catch (e) { /* shared drives have no owner */ }
+    keys.add(key);
+    tasks.push({
+      task: 'Look over: ' + truncate_(file.getName(), 90),
+      due: parseDue_(file.getName(), new Date()),
+      minutes: null,
+      source: 'Drive' + (owner ? ', shared by ' + owner : ''),
+      link: file.getUrl(),
+      key: key,
+    });
+  }
+  return tasks;
+}
+
+function senderName_(from) {
+  const m = from.match(/^\s*"?([^"<]+?)"?\s*</);
+  return m ? m[1] : from;
+}
+
+function truncate_(s, n) {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+// ---------- Gemini ----------
+
+/**
+ * Takes Gemini's reply and adds each task line.
+ * Expected line format (the prompt on the page asks for exactly this):
+ *   Task | YYYY-MM-DD or none | minutes | source
+ */
+function addFromGemini(text) {
+  const keys = existingKeys_();
+  const now = new Date();
+  let added = 0;
+
+  String(text || '').split('\n').forEach(raw => {
+    const line = raw.replace(/^\s*(?:[-*•☐]|\d+[.)])\s*/, '').trim();
+    const parts = line.split('|').map(s => s.trim());
+    if (parts.length < 2 || !parts[0] || /^task$/i.test(parts[0])) return;
+
+    const key = 'gemini:' + parts[0].toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (keys.has(key)) return;
+    keys.add(key);
+
+    const iso = (parts[1] || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    addTask_({
+      task: parts[0],
+      due: iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : parseDue_(parts[1] || '', now),
+      minutes: Number(parts[2]) || null,
+      source: 'Gemini' + (parts[3] ? ': ' + parts[3] : ''),
+      key: key,
+    });
+    added++;
+  });
+
+  const state = getState();
+  state.added = added;
+  return state;
 }
 
 // ---------- Parsing helpers ----------
