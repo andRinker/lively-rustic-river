@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    :root { --ink: #1f2328; --quiet: #656d76; --line: #d0d7de; --accent: #1a73e8; --pos: #188038; --neg: #c5221f; --bg: #fff; --chip: #f6f8fa; }
+    @media (prefers-color-scheme: dark) {
+      :root { --ink: #e6edf3; --quiet: #9198a1; --line: #3d444d; --accent: #8ab4f8; --pos: #81c995; --neg: #f28b82; --bg: #161b22; --chip: #21262d; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px 16px 140px; background: var(--bg); color: var(--ink);
+           font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .periods { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+    .periods button { flex: none; }
+    button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+             border-radius: 10px; padding: 10px 14px; cursor: pointer; }
+    button.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 14px; }
+    .grid button { text-align: left; min-height: 52px; position: relative; }
+    .badge { position: absolute; top: 4px; right: 8px; font-size: 12px; color: var(--quiet); }
+    input { width: 100%; margin-top: 12px; padding: 10px; font: inherit; color: var(--ink); background: transparent;
+            border: 1px solid var(--line); border-radius: 10px; }
+    .tags { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px 20px; background: var(--bg);
+            border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .tags button { padding: 14px; font-weight: 600; }
+    .tags button:disabled { opacity: .4; }
+    .tags .pos { color: var(--pos); }
+    .tags .neg { color: var(--neg); }
+    .who { grid-column: 1 / -1; color: var(--quiet); font-size: 14px; }
+    .toast { position: fixed; left: 16px; right: 16px; bottom: 150px; padding: 12px 14px; border-radius: 10px;
+             background: var(--ink); color: var(--bg); display: none; justify-content: space-between; align-items: center; }
+    .toast button { background: transparent; color: inherit; border: 1px solid currentColor; padding: 4px 10px; }
+    .quiet { color: var(--quiet); }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <h1>Log behavior</h1>
+  <div class="periods" id="periods"></div>
+  <input id="note" placeholder="Optional note (tap a student, then a tag)">
+  <div class="grid" id="students"><p class="quiet">Loading roster…</p></div>
+
+  <div class="tags" id="tags"><div class="who" id="who">Tap a student</div></div>
+  <div class="toast" id="toast"><span id="toastText"></span><button id="undo">Undo</button></div>
+
+<script>
+  const NEG = ['Redirect', 'Disruption', 'Off-task', 'Phone/device'];
+  const POS = ['Positive', 'Participation'];
+  let roster = { periods: {}, tags: [], today: {} };
+  let period = null;
+  let student = null;
+  let lastId = null;
+  let toastTimer = null;
+
+  const el = id => document.getElementById(id);
+
+  function remember(p) { try { localStorage.setItem('pp-period', p); } catch (e) {} }
+  function recall() { try { return localStorage.getItem('pp-period'); } catch (e) { return null; } }
+
+  function renderPeriods() {
+    const box = el('periods');
+    box.innerHTML = '';
+    Object.keys(roster.periods).sort().forEach(p => {
+      const b = document.createElement('button');
+      b.textContent = p;
+      b.className = p === period ? 'on' : '';
+      b.onclick = () => { period = p; student = null; remember(p); renderAll(); };
+      box.appendChild(b);
+    });
+  }
+
+  function renderStudents() {
+    const grid = el('students');
+    grid.innerHTML = '';
+    const names = roster.periods[period] || [];
+    if (!names.length) {
+      grid.innerHTML = '<p class="quiet">No students yet. Add them to the Roster tab in your Prep Prepper sheet.</p>';
+      return;
+    }
+    names.forEach(name => {
+      const b = document.createElement('button');
+      b.textContent = name;
+      b.className = name === student ? 'on' : '';
+      const n = roster.today[name];
+      if (n) {
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = n + ' today';
+        b.appendChild(badge);
+      }
+      b.onclick = () => { student = name === student ? null : name; renderAll(); };
+      grid.appendChild(b);
+    });
+  }
+
+  function renderTags() {
+    const box = el('tags');
+    box.innerHTML = '';
+    const who = document.createElement('div');
+    who.className = 'who';
+    who.textContent = student ? student + ' · period ' + period : 'Tap a student';
+    box.appendChild(who);
+    roster.tags.forEach(tag => {
+      const b = document.createElement('button');
+      b.textContent = tag;
+      b.className = POS.includes(tag) ? 'pos' : NEG.includes(tag) ? 'neg' : '';
+      b.disabled = !student;
+      b.onclick = () => save(tag);
+      box.appendChild(b);
+    });
+  }
+
+  function renderAll() { renderPeriods(); renderStudents(); renderTags(); }
+
+  function toast(text, undoable) {
+    el('toastText').textContent = text;
+    el('undo').style.display = undoable ? '' : 'none';
+    el('toast').style.display = 'flex';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el('toast').style.display = 'none'; }, 5000);
+  }
+
+  function save(tag) {
+    const who = student;
+    const note = el('note').value.trim();
+    student = null;
+    el('note').value = '';
+    renderAll();
+    toast('Saving ' + who + ' · ' + tag + '…', false);
+    google.script.run
+      .withSuccessHandler(res => {
+        lastId = res.id;
+        roster.today = res.today;
+        renderStudents();
+        toast('Logged ' + who + ' · ' + tag, true);
+      })
+      .withFailureHandler(err => toast('Not saved: ' + err.message, false))
+      .logBehavior(period, who, tag, note);
+  }
+
+  el('undo').onclick = () => {
+    if (!lastId) return;
+    const id = lastId;
+    lastId = null;
+    google.script.run
+      .withSuccessHandler(res => { roster.today = res.today; renderStudents(); toast('Undone', false); })
+      .withFailureHandler(err => toast('Undo failed: ' + err.message, false))
+      .undoBehavior(id);
+  };
+
+  google.script.run
+    .withSuccessHandler(r => {
+      roster = r;
+      const periods = Object.keys(r.periods).sort();
+      const saved = recall();
+      period = periods.includes(saved) ? saved : periods[0] || null;
+      renderAll();
+    })
+    .withFailureHandler(err => { el('students').innerHTML = '<p class="quiet">' + err.message + '</p>'; })
+    .getRoster();
+</script>
+</body>
+</html>
