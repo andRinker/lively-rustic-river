@@ -49,7 +49,6 @@
   <div class="row">
     <button id="refresh" class="ghost">Scan Gmail and Drive now</button>
     <span class="meta" id="scanned"></span>
-    <a id="logLink" href="#" style="margin-left:auto;font-weight:600">Log behavior →</a>
   </div>
 
   <h2>To do this prep</h2>
@@ -171,7 +170,6 @@ KNOW | Weekly Bulletin Oct 27 | Picture day moved to Nov 4, and Friday is early 
   function render(state) {
     const tasks = state.tasks;
     renderKnow(state.know || []);
-    if (state.logUrl) document.getElementById('logLink').href = state.logUrl;
     scanned.textContent = state.lastScan ? 'Last scanned ' + state.lastScan : 'Not scanned yet';
     refreshBtn.disabled = false;
     list.innerHTML = '';

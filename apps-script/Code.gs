@@ -28,7 +28,6 @@ function onOpen() {
     .addItem('1. Set up', 'setup')
     .addItem('2. Test Gmail and Drive access', 'testAccess')
     .addItem('3. Turn on hourly scan', 'installTriggers')
-    .addItem('4. Set up behavior log', 'setupBehavior')
     .addSeparator()
     .addItem('Scan Gmail and Drive now', 'scanNowFromMenu')
     .addItem('Re-check my list with the latest rules', 'recheckFromMenu')
@@ -105,10 +104,9 @@ function scanNowFromMenu() {
 
 // ---------- Web page ----------
 
-function doGet(e) {
-  const log = e && e.parameter && e.parameter.page === 'log';
-  return HtmlService.createHtmlOutputFromFile(log ? 'Log' : 'Index')
-    .setTitle(log ? 'Log behavior' : 'Prep Prepper')
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index')
+    .setTitle('Prep Prepper')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
@@ -128,7 +126,6 @@ function getState() {
   return {
     tasks: getTasks(),
     know: getKnow_(),
-    logUrl: ScriptApp.getService().getUrl() + '?page=log',
     lastScan: last ? Utilities.formatDate(new Date(Number(last)), Session.getScriptTimeZone(), 'EEE h:mm a') : '',
   };
 }
@@ -250,7 +247,6 @@ function scanAll() {
     const keys = existingKeys_();
     const found = scanGmail_(since, keys).concat(scanDrive_(since, keys));
     found.forEach(addTask_);
-    checkPatterns_();
     props.setProperty('LAST_SCAN', String(Date.now()));
     return { added: found.length, state: getState() };
   } finally {
