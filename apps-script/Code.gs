@@ -454,7 +454,7 @@ function truncate_(s, n) {
 /**
  * Takes Gemini's reply. The prompt on the page asks for two kinds of lines:
  *   TASK | what to do | YYYY-MM-DD or none | minutes | where it came from
- *   KNOW | the email's exact subject | one-sentence gist
+ *   KNOW | the email's exact subject, or "Chat: <space or person>" | one-sentence gist
  * A KNOW line fills in the gist of the matching "Need to know" item, or adds one.
  * Lines without a TASK/KNOW label are read as tasks.
  */
@@ -475,16 +475,19 @@ function addFromGemini(text) {
       const subject = parts[1] || '';
       const gist = parts.slice(2).join(' | ');
       if (!subject || /^(the )?email'?s exact subject$/i.test(subject)) return;
-      const row = findKnowRow_(sheet, subject);
+      // Chat updates have no email to attach to, and one space can post many
+      // different updates, so each chat gist is its own item.
+      const isChat = /^chat\s*:/i.test(subject);
+      const row = isChat ? 0 : findKnowRow_(sheet, subject);
       if (row) {
         sheet.getRange(row, COL.summary + 1).setValue(gist);
         gists++;
         return;
       }
-      const key = 'gemini-know:' + normalize_(subject);
+      const key = 'gemini-know:' + normalize_(subject) + ':' + normalize_(gist).slice(0, 80);
       if (keys.has(key)) return;
       keys.add(key);
-      addTask_({ kind: 'know', task: subject, summary: gist, source: 'Gemini', key: key });
+      addTask_({ kind: 'know', task: subject, summary: gist, source: isChat ? 'Google Chat, via Gemini' : 'Gemini', key: key });
       gists++;
       return;
     }

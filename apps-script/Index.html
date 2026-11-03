@@ -69,22 +69,24 @@
   <button id="add">Add to list</button>
 
   <h2>From Gemini</h2>
-  <p class="hint" style="margin-top:0">Gemini reads your email the way a person would: it finds the tasks the scanner misses and boils each announcement down to one line. Copy the prompt, paste it into a new chat at gemini.google.com, then paste Gemini's whole answer below.</p>
+  <p class="hint" style="margin-top:0">Gemini reads your email and Google Chat the way a person would: it finds the tasks the scanner misses and boils each announcement down to one line. Copy the prompt, paste it into a new chat at gemini.google.com, then paste Gemini's whole answer below.</p>
   <details>
     <summary>Show the prompt</summary>
-    <pre id="prompt">Use @Gmail and @Google Drive. Look at my inbox and the files shared with me from the last 24 hours (go back to Friday if today is Monday). Skip lesson planning and grading. Don't include student names.
+    <pre id="prompt">Use @Gmail, @Google Chat, and @Google Drive. Look at the last 24 hours (go back to Friday if today is Monday): my inbox, my Google Chat direct messages and spaces, and the files shared with me. Chat moves fast, so read every space, not just the ones where I'm mentioned. Skip lesson planning and grading. Don't include student names.
 
-1. Find everything that asks me to do something: reply, fill out, sign, submit, RSVP, attend, make copies, read and acknowledge, or meet a deadline. Write one line per task:
+1. Find everything that asks me to do something: reply, fill out, sign, submit, RSVP, attend, cover, make copies, read and acknowledge, or meet a deadline. That includes asks buried in chat threads. Write one line per task:
 TASK | what to do | YYYY-MM-DD or none | estimated minutes | where it came from
 
-2. For every announcement, newsletter, or all-staff email, write one line saying what I actually need to know (changes, dates, anything that affects my classroom or schedule):
-KNOW | the email's exact subject | one-sentence gist
+2. For every announcement, newsletter, all-staff email, or chat update that changes something for me (schedules, dates, procedures, anything affecting my classroom), write one line:
+KNOW | the email's exact subject, or "Chat: " plus the space or person's name | one-sentence gist
 
-Reply ONLY with those lines, with no headings or other text.
+Combine repeat chat messages about the same thing into one line. Reply ONLY with those lines, with no headings or other text.
 
 Example:
 TASK | Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
-KNOW | Weekly Bulletin Oct 27 | Picture day moved to Nov 4, and Friday is early dismissal at 1:30.</pre>
+TASK | Tell Mr. Diaz if you can cover 3rd period Thursday | 2026-11-05 | 2 | Chat from Mr. Diaz
+KNOW | Weekly Bulletin Oct 27 | Picture day moved to Nov 4, and Friday is early dismissal at 1:30.
+KNOW | Chat: 6th Grade Team | Team meeting moved to Wednesday at 3:15 in room 204.</pre>
   </details>
   <div class="row"><button id="copy" class="ghost">Copy prompt</button></div>
   <textarea id="gemini" placeholder="Paste Gemini's answer here"></textarea>
