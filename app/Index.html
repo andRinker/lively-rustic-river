@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    :root { --ink: #1f2328; --quiet: #656d76; --line: #d0d7de; --accent: #1a73e8; --late: #c5221f; --bg: #fff; }
+    @media (prefers-color-scheme: dark) {
+      :root { --ink: #e6edf3; --quiet: #9198a1; --line: #3d444d; --accent: #8ab4f8; --late: #f28b82; --bg: #161b22; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; background: var(--bg); color: var(--ink);
+           font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 4px 0 2px; }
+    .sub { color: var(--quiet); margin: 0 0 20px; }
+    h2 { font-size: 15px; margin: 24px 0 8px; }
+    textarea { width: 100%; min-height: 72px; padding: 10px; font: inherit; color: var(--ink);
+               background: transparent; border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
+    .hint { color: var(--quiet); font-size: 13px; margin: 6px 0 0; }
+    button { margin-top: 8px; padding: 8px 16px; font: inherit; font-weight: 600; color: #fff;
+             background: var(--accent); border: 0; border-radius: 8px; cursor: pointer; }
+    button:disabled { opacity: .5; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    li input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
+    .task { flex: 1; }
+    .meta { color: var(--quiet); font-size: 13px; }
+    .late { color: var(--late); font-weight: 600; }
+    a { color: var(--accent); }
+    .empty { color: var(--quiet); padding: 12px 0; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .row button { margin-top: 0; }
+    button.ghost { color: var(--accent); background: transparent; border: 1px solid var(--line); }
+    .x { margin: 0; padding: 0 6px; font-size: 18px; line-height: 1; color: var(--quiet);
+         background: transparent; font-weight: 400; flex: none; }
+    pre { white-space: pre-wrap; font: 13px/1.4 ui-monospace, Menlo, monospace; color: var(--quiet);
+          border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 8px 0; }
+    details summary { cursor: pointer; color: var(--accent); }
+    .gist { margin-top: 2px; }
+    .gist.none { color: var(--quiet); font-style: italic; }
+    .update { border: 1px solid var(--accent); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+    .update ul { margin: 6px 0 10px; padding-left: 20px; list-style: disc; }
+    .update li { display: list-item; padding: 0; border: 0; }
+    button.small { margin: 0; padding: 4px 10px; font-size: 13px; font-weight: 600; flex: none; }
+  </style>
+</head>
+<body>
+<main>
+  <div id="update" class="update" hidden>
+    <strong id="updateTitle"></strong>
+    <ul id="updateNotes"></ul>
+    <div class="row">
+      <button id="updateBtn">Install update</button>
+      <a id="reload" target="_top" hidden>Reload Prep Prepper</a>
+      <span class="meta" id="updateMsg"></span>
+    </div>
+  </div>
+  <h1>Prep Prepper</h1>
+  <p class="sub" id="count">Loading your list…</p>
+
+  <div class="row">
+    <button id="refresh" class="ghost">Scan Gmail and Drive now</button>
+    <span class="meta" id="scanned"></span>
+  </div>
+
+  <h2>To do this prep</h2>
+  <ul id="list"></ul>
+  <details id="laterBox" hidden>
+    <summary id="laterSum"></summary>
+    <ul id="later"></ul>
+  </details>
+  <p class="hint">Tick when done. Click ✕ if something isn't really a task; it won't come back.</p>
+
+  <h2>Need to know <span class="meta" id="knowCount"></span></h2>
+  <ul id="know"></ul>
+  <p class="hint">Announcements and newsletters land here instead of your to-dos. The one-line gists come from the Gemini prompt below. Click "Got it" to clear one.</p>
+
+  <h2>Brain dump</h2>
+  <textarea id="dump" placeholder="One thing per line, e.g. &quot;order chart paper by Thursday 5 min&quot;"></textarea>
+  <p class="hint">Deadlines it understands: today, tomorrow, Friday, by Thu, 10/31, Oct 31. Add &quot;5 min&quot; for a time estimate.</p>
+  <button id="add">Add to list</button>
+
+  <h2>From Gemini</h2>
+  <p class="hint" style="margin-top:0">Gemini reads your email and Google Chat the way a person would: it finds the tasks the scanner misses and boils each announcement down to one line. Copy the prompt, paste it into a new chat at gemini.google.com, then paste Gemini's whole answer below.</p>
+  <details>
+    <summary>Show the prompt</summary>
+    <pre id="prompt">Use @Gmail, @Google Chat, and @Google Drive. Look at the last 24 hours (go back to Friday if today is Monday): my inbox, my Google Chat direct messages and spaces, and the files shared with me. Chat moves fast, so read every space, not just the ones where I'm mentioned. Skip lesson planning and grading. Don't include student names.
+
+1. Find everything that asks me to do something: reply, fill out, sign, submit, RSVP, attend, cover, make copies, read and acknowledge, or meet a deadline. That includes asks buried in chat threads. Write one line per task:
+TASK | what to do | YYYY-MM-DD or none | estimated minutes | where it came from
+
+2. For every announcement, newsletter, all-staff email, or chat update that changes something for me (schedules, dates, procedures, anything affecting my classroom), write one line:
+KNOW | the email's exact subject, or "Chat: " plus the space or person's name | one-sentence gist
+
+Combine repeat chat messages about the same thing into one line. Reply ONLY with those lines, with no headings or other text.
+
+Example:
+TASK | Return field trip roster to front office | 2026-10-30 | 5 | Email from Ms. Lopez
+TASK | Tell Mr. Diaz if you can cover 3rd period Thursday | 2026-11-05 | 2 | Chat from Mr. Diaz
+KNOW | Weekly Bulletin Oct 27 | Picture day moved to Nov 4, and Friday is early dismissal at 1:30.
+KNOW | Chat: 6th Grade Team | Team meeting moved to Wednesday at 3:15 in room 204.</pre>
+  </details>
+  <div class="row"><button id="copy" class="ghost">Copy prompt</button></div>
+  <textarea id="gemini" placeholder="Paste Gemini's answer here"></textarea>
+  <button id="addGemini">Add Gemini's answer</button>
+
+  <p class="hint" id="version" style="margin-top:32px"></p>
+</main>
+
+<script>
+  const SHOW_FIRST = 10;
+
+  // Every call to the school-account side goes through the starter's one entry point.
+  function server(name, args, ok, bad) {
+    google.script.run.withSuccessHandler(ok).withFailureHandler(bad || fail).api(name, args);
+  }
+
+  const list = document.getElementById('list');
+  const later = document.getElementById('later');
+  const laterBox = document.getElementById('laterBox');
+  const laterSum = document.getElementById('laterSum');
+  const count = document.getElementById('count');
+  const dump = document.getElementById('dump');
+  const addBtn = document.getElementById('add');
+  const refreshBtn = document.getElementById('refresh');
+  const scanned = document.getElementById('scanned');
+  const gemini = document.getElementById('gemini');
+  const geminiBtn = document.getElementById('addGemini');
+  const knowList = document.getElementById('know');
+  const knowCount = document.getElementById('knowCount');
+
+  function renderKnow(items) {
+    knowList.innerHTML = '';
+    knowCount.textContent = items.length ? '(' + items.length + ')' : '';
+    if (!items.length) {
+      knowList.innerHTML = '<li class="empty">Nothing new.</li>';
+      return;
+    }
+    items.forEach(k => {
+      const li = document.createElement('li');
+      const body = document.createElement('div');
+      body.className = 'task';
+      const head = document.createElement('div');
+      head.style.fontWeight = '600';
+      head.textContent = k.headline;
+      const gist = document.createElement('div');
+      gist.className = k.summary ? 'gist' : 'gist none';
+      gist.textContent = k.summary || 'No gist yet. Run the Gemini prompt below.';
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = [k.source, k.added].filter(Boolean).join(' · ');
+      if (k.link) {
+        meta.appendChild(document.createTextNode(' · '));
+        const a = document.createElement('a');
+        a.href = k.link;
+        a.textContent = 'open';
+        a.target = '_blank';
+        meta.appendChild(a);
+      }
+      const ok = document.createElement('button');
+      ok.className = 'ghost small';
+      ok.textContent = 'Got it';
+      ok.onclick = () => {
+        ok.disabled = true;
+        server('setStatus', [k.id, 'done'], render);
+      };
+      body.appendChild(head);
+      body.appendChild(gist);
+      body.appendChild(meta);
+      li.appendChild(body);
+      li.appendChild(ok);
+      knowList.appendChild(li);
+    });
+  }
+
+  function todayIso() {
+    const d = new Date();
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  }
+
+  function dueLabel(due) {
+    if (!due) return { text: 'No deadline', late: false };
+    const today = todayIso();
+    const days = Math.round((Date.parse(due) - Date.parse(today)) / 864e5);
+    if (days < 0) return { text: 'Overdue (' + due.slice(5) + ')', late: true };
+    if (days === 0) return { text: 'Due today', late: true };
+    if (days === 1) return { text: 'Due tomorrow', late: false };
+    const name = new Date(due + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    return { text: 'Due ' + name, late: false };
+  }
+
+  function render(state) {
+    const tasks = state.tasks;
+    renderKnow(state.know || []);
+    scanned.textContent = state.lastScan ? 'Last scanned ' + state.lastScan : 'Not scanned yet';
+    refreshBtn.disabled = false;
+    list.innerHTML = '';
+    later.innerHTML = '';
+    laterBox.hidden = tasks.length <= SHOW_FIRST;
+    laterSum.textContent = 'Later (' + Math.max(0, tasks.length - SHOW_FIRST) + ' more)';
+    const quick = tasks.filter(t => t.quick).length;
+    count.textContent = tasks.length
+      ? tasks.length + ' open, ' + quick + ' quick win' + (quick === 1 ? '' : 's') + ' (⚡ = ' + 5 + ' min or less)'
+      : 'Nothing open. Enjoy your prep.';
+    if (!tasks.length) {
+      list.innerHTML = '<li class="empty">All clear.</li>';
+      return;
+    }
+    tasks.forEach((t, i) => {
+      const li = document.createElement('li');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.onchange = () => {
+        box.disabled = true;
+        server('setStatus', [t.id, 'done'], render);
+      };
+      const x = document.createElement('button');
+      x.className = 'x';
+      x.title = 'Not a task';
+      x.textContent = '✕';
+      x.onclick = () => {
+        x.disabled = true;
+        server('setStatus', [t.id, 'dismissed'], render);
+      };
+      const body = document.createElement('div');
+      body.className = 'task';
+      const title = document.createElement('div');
+      title.textContent = (t.quick ? '⚡ ' : '') + t.task;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const due = dueLabel(t.due);
+      const dueSpan = document.createElement('span');
+      dueSpan.textContent = due.text;
+      if (due.late) dueSpan.className = 'late';
+      meta.appendChild(dueSpan);
+      if (t.minutes) meta.appendChild(document.createTextNode(' · ~' + t.minutes + ' min'));
+      if (t.source) meta.appendChild(document.createTextNode(' · ' + t.source));
+      if (t.link) {
+        meta.appendChild(document.createTextNode(' · '));
+        const a = document.createElement('a');
+        a.href = t.link;
+        a.textContent = 'open';
+        a.target = '_blank';
+        meta.appendChild(a);
+      }
+      body.appendChild(title);
+      body.appendChild(meta);
+      li.appendChild(box);
+      li.appendChild(body);
+      li.appendChild(x);
+      (i < SHOW_FIRST ? list : later).appendChild(li);
+    });
+  }
+
+  function fail(err) {
+    count.textContent = 'Something went wrong: ' + (err && err.message ? err.message : err);
+    addBtn.disabled = false;
+    refreshBtn.disabled = false;
+    geminiBtn.disabled = false;
+  }
+
+  addBtn.onclick = () => {
+    if (!dump.value.trim()) return;
+    addBtn.disabled = true;
+    server('addFromBrainDump', [dump.value], state => { dump.value = ''; addBtn.disabled = false; render(state); });
+  };
+
+  refreshBtn.onclick = () => {
+    refreshBtn.disabled = true;
+    scanned.textContent = 'Scanning…';
+    server('refreshNow', [], render);
+  };
+
+  document.getElementById('copy').onclick = e => {
+    const text = document.getElementById('prompt').textContent;
+    navigator.clipboard.writeText(text).then(
+      () => { e.target.textContent = 'Copied'; },
+      () => { document.querySelector('details').open = true; e.target.textContent = 'Select the prompt above and copy it'; }
+    );
+  };
+
+  geminiBtn.onclick = () => {
+    if (!gemini.value.trim()) return;
+    geminiBtn.disabled = true;
+    server('addFromGemini', [gemini.value], state => {
+      gemini.value = '';
+      geminiBtn.disabled = false;
+      geminiBtn.textContent = 'Added ' + state.added + ' task' + (state.added === 1 ? '' : 's') +
+        ' and ' + state.gists + ' gist' + (state.gists === 1 ? '' : 's');
+      render(state);
+    });
+  };
+
+  // ---------- Updates ----------
+  // The starter checks GitHub for a newer version. Only code comes down; nothing is sent up.
+  const updateBox = document.getElementById('update');
+  const updateBtn = document.getElementById('updateBtn');
+  const updateMsg = document.getElementById('updateMsg');
+  const reload = document.getElementById('reload');
+
+  function showUpdate(status) {
+    document.getElementById('version').textContent = 'Version ' + status.installed +
+      (status.error ? ' · Could not check for updates: ' + status.error : '');
+    if (status.url) reload.href = status.url;
+    if (!status.available) return;
+    document.getElementById('updateTitle').textContent = 'Update available: version ' + status.latest;
+    const notes = document.getElementById('updateNotes');
+    notes.innerHTML = '';
+    status.notes.forEach(n => {
+      const li = document.createElement('li');
+      li.textContent = n;
+      notes.appendChild(li);
+    });
+    updateBox.hidden = false;
+  }
+
+  updateBtn.onclick = () => {
+    updateBtn.disabled = true;
+    updateMsg.textContent = 'Installing…';
+    server('pp.installUpdate', [], result => {
+      updateBtn.hidden = true;
+      updateMsg.textContent = 'Now on version ' + result.installed + '.';
+      reload.hidden = false;
+    }, err => {
+      updateBtn.disabled = false;
+      updateMsg.textContent = 'Update failed, nothing changed: ' + (err && err.message ? err.message : err);
+    });
+  };
+
+  server('getState', [], render);
+  server('pp.updateStatus', [], showUpdate, () => {});
+</script>
+</body>
+</html>

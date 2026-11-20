@@ -1,0 +1,9 @@
+[
+  {
+    "version": "1.0.0",
+    "notes": [
+      "Prep Prepper can now update itself. Use Prep Prepper > Check for updates in your sheet, or the banner at the top of this page.",
+      "Everything else works the way it did in the Google Chat version."
+    ]
+  }
+]

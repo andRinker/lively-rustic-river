@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "sha256": "8180c5048f9a1bf920aabd1bf055dcb59ea04a78f3fae6907cc770bcc8dec577",
+  "history": [
+    {
+      "version": "1.0.0",
+      "notes": [
+        "Prep Prepper can now update itself. Use Prep Prepper > Check for updates in your sheet, or the banner at the top of this page.",
+        "Everything else works the way it did in the Google Chat version."
+      ]
+    }
+  ]
+}

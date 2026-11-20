@@ -1,0 +1,21 @@
+name: Check release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Fails if the release files are out of date, or the app changed without a new version.
+      - run: node tools/build.js --check
+      # Runs the starter and the app inside a simulated Apps Script.
+      - run: node --test test/starter.test.js
