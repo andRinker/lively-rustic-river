@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.0.1",
+    "notes": [
+      "The page footer now also names the phase you are on (Phase 3 · One-click updates), so it is easy to tell which version is which.",
+      "Nothing else changes."
+    ]
+  },
+  {
     "version": "1.0.0",
     "notes": [
       "Prep Prepper can now update itself. Use Prep Prepper > Check for updates in your sheet, or the banner at the top of this page.",

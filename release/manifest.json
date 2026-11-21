@@ -1,8 +1,15 @@
 {
-  "version": "1.0.0",
-  "sha256": "8180c5048f9a1bf920aabd1bf055dcb59ea04a78f3fae6907cc770bcc8dec577",
+  "version": "1.0.1",
+  "sha256": "07f068d7a390d23f266f685943a12e5524e8c55a9ca5adebadd111c522ebf7d5",
   "needsStarter": 1,
   "history": [
+    {
+      "version": "1.0.1",
+      "notes": [
+        "The page footer now also names the phase you are on (Phase 3 · One-click updates), so it is easy to tell which version is which.",
+        "Nothing else changes."
+      ]
+    },
     {
       "version": "1.0.0",
       "notes": [
