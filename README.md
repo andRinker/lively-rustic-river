@@ -1,6 +1,8 @@
-﻿# Prep Prepper
+# Prep Prepper
 
-A prep-time to-do list for a teacher, running as a Google Sheet plus an Apps Script web page inside the school Google account. Student data never leaves school Google.
+Does a teacher's back-office busywork so they show up to prep with a short checklist of doable to-dos, ranked by deadline. Lesson planning, grading, and judgment calls stay with the teacher.
+
+It runs entirely inside the school's Google Workspace: a Google Sheet plus Apps Script, so student data never leaves school Google. Gemini interprets email, data exports feed intervention groups, and a behavior form and a brain-dump box cover everything else.
 
 ## How installing and updating work
 
@@ -27,3 +29,7 @@ Teacher-facing steps: [docs/ONE-CLICK-SETUP.md](docs/ONE-CLICK-SETUP.md)
 CI fails the pull request if the release files are stale or the app changed without a version bump.
 
 If the app needs a Google service the starter doesn't already mention (see `declareAccess_` in `starter/Code.gs`), the teacher has to paste a new starter once, so avoid that where you can.
+
+## Older files
+
+`apps-script/` is the original paste-in version of the hub ([`SETUP.md`](apps-script/SETUP.md)). Use the starter and one-click steps above instead; `app/` is the same app, kept current.
