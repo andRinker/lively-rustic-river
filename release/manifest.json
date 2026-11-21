@@ -1,6 +1,7 @@
 {
   "version": "1.0.0",
   "sha256": "8180c5048f9a1bf920aabd1bf055dcb59ea04a78f3fae6907cc770bcc8dec577",
+  "needsStarter": 1,
   "history": [
     {
       "version": "1.0.0",

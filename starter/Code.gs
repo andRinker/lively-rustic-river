@@ -20,6 +20,10 @@ const PP_CHUNK = 2500;        // saved settings hold ~9 KB per entry, so code is
 const PP_MENU_SLOTS = 12;     // how many menu items the app may add
 const PP_P = 'PPU_';          // prefix for everything the starter saves
 
+// Which generation of starter this is. An update that needs a newer starter than the one
+// in your Apps Script is refused with a plain message instead of half-working.
+const PP_STARTER = 1;
+
 let ppApp_;                   // the loaded app, remembered for the length of one run
 
 // ---------- Permissions ----------
@@ -178,6 +182,7 @@ function loadApp_() {
 function compile_(bundle) {
   const PP = {
     version: bundle.version,
+    starter: PP_STARTER,
     html: function (name) {
       const file = /\.html$/.test(name) ? name : name + '.html';
       if (typeof bundle.files[file] !== 'string') throw new Error('Missing page: ' + name);
@@ -290,6 +295,13 @@ function fetchManifest_(fresh) {
   return m;
 }
 
+function requireStarter_(m) {
+  if (Number(m.needsStarter || 1) > PP_STARTER) {
+    throw new Error('Version ' + m.version + ' needs a newer Prep Prepper starter than the one in your Apps Script. ' +
+      'Nothing was changed and your current version keeps working. Ask Claude for the new starter file.');
+  }
+}
+
 /** What the page and the menu show. Never throws; problems come back as status.error. */
 function updateStatus_(fresh) {
   const installed = installedVersion_();
@@ -297,6 +309,7 @@ function updateStatus_(fresh) {
   try { status.url = ScriptApp.getService().getUrl() || ''; } catch (e) { /* not deployed yet */ }
   try {
     const m = fetchManifest_(fresh);
+    requireStarter_(m);
     const props = PropertiesService.getScriptProperties();
     props.setProperty(PP_P + 'LATEST', m.version);
     status.latest = m.version;
@@ -316,6 +329,7 @@ function installLatest_() {
   if (!lock.tryLock(20000)) throw new Error('Another update is running. Try again in a minute.');
   try {
     const m = fetchManifest_(true);
+    requireStarter_(m);
     const bundle = fetchJson_(PP_RAW + 'bundle.json?v=' + m.version);
     if (bundle.version !== m.version || bundle.sha256 !== m.sha256 || !bundle.files || hashOf_(bundle.files) !== m.sha256) {
       throw new Error('The download did not match what GitHub said it should be.');

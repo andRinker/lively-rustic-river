@@ -114,10 +114,10 @@ function makeWorld(remote) {
 
 // ---------- Release builder, so tests can make versions ----------
 
-function release({ code, html, version, notes }) {
+function release({ code, html, version, notes, needsStarter }) {
   const sha = crypto.createHash('sha256').update(code + '\u0000' + html, 'utf8').digest('hex');
   return {
-    manifest: JSON.stringify({ version, sha256: sha, history: [{ version, notes: notes || ['Test change'] }] }),
+    manifest: JSON.stringify({ version, sha256: sha, needsStarter, history: [{ version, notes: notes || ['Test change'] }] }),
     bundle: JSON.stringify({ version, sha256: sha, files: { 'Code.js': code, 'Index.html': html } }),
   };
 }
@@ -294,6 +294,44 @@ test('no network or a blocked site gives a plain message and changes nothing', (
   // The page still works while offline.
   w.store.HUB_ID = 'sheet-id';
   assert.equal(w.run("api('getState', [])").tasks.length, 0);
+});
+
+test('an update that needs a newer starter is refused, and the current version keeps working', () => {
+  let rel = release({ code: realCode, html: realHtml, version: '1.0.0' });
+  const w = makeWorld(name => serve(rel)(name));
+  w.run('ppCheckForUpdates()');
+  w.store.HUB_ID = 'sheet-id';
+
+  rel = release({ code: realCode + '\n// needs more', html: realHtml, version: '2.0.0', needsStarter: 2 });
+  w.clearCache();
+  w.alerts.length = 0;
+  w.run('ppCheckForUpdates()');
+  assert.match(w.alerts[0][1], /newer Prep Prepper starter/);
+  assert.equal(w.run('installedVersion_()'), '1.0.0');
+
+  const status = w.run("api('pp.updateStatus', [])");
+  assert.equal(status.available, false);
+  assert.match(status.error, /Ask Claude for the new starter/);
+  assert.throws(() => w.run("api('pp.installUpdate', [])"), /newer Prep Prepper starter/);
+  assert.equal(w.run("api('getState', [])").tasks.length, 0, 'app still works');
+});
+
+test('a starter push (what clasp does) leaves the installed app and its data alone', () => {
+  const rel = release({ code: realCode, html: realHtml, version: '1.0.0' });
+  const w = makeWorld(serve(rel));
+  w.run('ppCheckForUpdates()');
+  w.store.HUB_ID = 'sheet-id';
+  w.run("api('addFromBrainDump', ['Keep me'])");
+  const before = { ...w.store };
+
+  // Pretend clasp replaced the starter code: a fresh run of the same starter over the same saved settings.
+  const w2 = makeWorld(serve(rel));
+  Object.assign(w2.store, before);
+  assert.equal(w2.run('installedVersion_()'), '1.0.0');
+  assert.equal(w2.run("api('getState', [])").tasks.length, 0, 'app still loads from saved settings');
+  w2.run('onOpen()');
+  assert.ok(w2.menu().some(i => i[0] === 'Check for updates'));
+  assert.deepEqual(w2.store, before, 'starting the starter changes no saved settings');
 });
 
 test('declining the prompt installs nothing', () => {

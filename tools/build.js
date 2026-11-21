@@ -36,6 +36,15 @@ function build() {
     if (i && cmp(changes[i - 1].version, c.version) <= 0) throw new Error('changes.json must list newest first.');
   });
 
+  // An entry may say "needsStarter": 2 when the app can't run on the starter people already have.
+  const needsStarter = changes[0].needsStarter === undefined ? 1 : changes[0].needsStarter;
+  if (!Number.isInteger(needsStarter) || needsStarter < 1) throw new Error('needsStarter must be a whole number, 1 or more.');
+  const starterNow = Number((read('starter/Code.gs').match(/const PP_STARTER = (\d+);/) || [])[1]);
+  if (!starterNow) throw new Error('Could not find PP_STARTER in starter/Code.gs.');
+  if (needsStarter > starterNow) {
+    throw new Error('This release needs starter ' + needsStarter + ' but starter/Code.gs is generation ' + starterNow + '. Bump PP_STARTER there too.');
+  }
+
   // Must match hashOf_ in starter/Code.gs.
   const sha256 = crypto.createHash('sha256').update(code + '\u0000' + html, 'utf8').digest('hex');
   const version = changes[0].version;
@@ -44,7 +53,7 @@ function build() {
     sha256,
     files: {
       'release/bundle.json': JSON.stringify({ version, sha256, files: { 'Code.js': code, 'Index.html': html } }) + '\n',
-      'release/manifest.json': JSON.stringify({ version, sha256, history: changes.slice(0, 10) }, null, 2) + '\n',
+      'release/manifest.json': JSON.stringify({ version, sha256, needsStarter, history: changes.slice(0, 10).map(({ version, notes }) => ({ version, notes })) }, null, 2) + '\n',
     },
   };
 }
