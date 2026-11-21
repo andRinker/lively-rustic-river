@@ -30,6 +30,9 @@ CI fails the pull request if the release files are stale or the app changed with
 
 If the app needs a Google service the starter doesn't already mention (see `declareAccess_` in `starter/Code.gs`), the teacher has to paste a new starter once, so avoid that where you can.
 
+## Version
+Current version and phase: [VERSION](VERSION). History: [CHANGELOG.md](CHANGELOG.md). The page footer shows the same number.
+
 ## Older files
 
-`apps-script/` is the original paste-in version of the hub ([`SETUP.md`](apps-script/SETUP.md)). Use the starter and one-click steps above instead; `app/` is the same app, kept current.
+`archive/phase-1-2-original-paste-in/` is the original paste-in version of the hub ([`SETUP.md`](archive/phase-1-2-original-paste-in/SETUP.md)). Use the starter and one-click steps above instead; `app/` is the same app, kept current.
