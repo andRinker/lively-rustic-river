@@ -299,7 +299,7 @@ KNOW | Chat: 6th Grade Team | Team meeting moved to Wednesday at 3:15 in room 20
   const reload = document.getElementById('reload');
 
   function showUpdate(status) {
-    document.getElementById('version').textContent = 'Version ' + status.installed +
+    document.getElementById('version').textContent = 'Version ' + status.installed + ' · Phase 3 · One-click updates' +
       (status.error ? ' · Could not check for updates: ' + status.error : '');
     if (status.url) reload.href = status.url;
     if (!status.available) return;
